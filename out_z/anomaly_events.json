@@ -1,0 +1,190 @@
+[
+  {
+    "event_id": 1,
+    "start_ts": "2025-11-04 11:50:37+00:00",
+    "end_ts": "2025-11-04 11:50:49+00:00",
+    "duration_s": 12.0,
+    "phase_mix": {
+      "base": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "objecter_op_latency_s_resid",
+        12.957536939348381,
+        "up"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        12.953919440032085,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        10.422761463980152,
+        "down"
+      ],
+      [
+        "objecter_ops_rate_resid",
+        9.710225596607794,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.33697488765798655,
+        "down"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.15977664785937293,
+        "down"
+      ]
+    ],
+    "max_abs_z": 12.957536939348381,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.46499999999999997,
+    "label": "moderate"
+  },
+  {
+    "event_id": 2,
+    "start_ts": "2025-11-04 12:11:45+00:00",
+    "end_ts": "2025-11-04 12:12:07+00:00",
+    "duration_s": 22.0,
+    "phase_mix": {
+      "stress": 9
+    },
+    "n_points": 9,
+    "metrics_top": [
+      [
+        "mds_journal_latency_s_resid",
+        52.56016115661696,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        14.831334302847054,
+        "down"
+      ],
+      [
+        "objecter_ops_rate_resid",
+        10.112730287791834,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        6.192812263837232,
+        "up"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        2.329575313915275,
+        "up"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.13966032391735053,
+        "up"
+      ]
+    ],
+    "max_abs_z": 52.56016115661696,
+    "metrics_count": 9,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5920833333333333,
+    "label": "moderate"
+  },
+  {
+    "event_id": 3,
+    "start_ts": "2025-11-04 12:47:22+00:00",
+    "end_ts": "2025-11-04 12:47:46+00:00",
+    "duration_s": 24.0,
+    "phase_mix": {
+      "stress": 6
+    },
+    "n_points": 6,
+    "metrics_top": [
+      [
+        "objecter_ops_rate_resid",
+        16.128725473478127,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        10.120017116834997,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        3.5191019280307154,
+        "down"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        3.37053009938006,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.20845497090273143,
+        "down"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.15977663614906712,
+        "down"
+      ]
+    ],
+    "max_abs_z": 16.128725473478127,
+    "metrics_count": 6,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5425,
+    "label": "moderate"
+  },
+  {
+    "event_id": 4,
+    "start_ts": "2025-11-04 13:23:46+00:00",
+    "end_ts": "2025-11-04 13:24:09+00:00",
+    "duration_s": 23.0,
+    "phase_mix": {
+      "stress": 9
+    },
+    "n_points": 9,
+    "metrics_top": [
+      [
+        "objecter_op_latency_s_resid",
+        25.856887345422262,
+        "up"
+      ],
+      [
+        "objecter_ops_rate_resid",
+        16.833491880401397,
+        "up"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        9.667897650531643,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        7.141789337454778,
+        "down"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.3371998250608416,
+        "down"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.15977664785629045,
+        "down"
+      ]
+    ],
+    "max_abs_z": 25.856887345422262,
+    "metrics_count": 8,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5766666666666667,
+    "label": "moderate"
+  }
+]

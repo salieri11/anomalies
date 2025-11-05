@@ -1,0 +1,96 @@
+[
+  {
+    "event_id": 2,
+    "start_ts": "2025-11-04 12:11:45+00:00",
+    "end_ts": "2025-11-04 12:11:56+00:00",
+    "duration_s": 11.0,
+    "phase_mix": {
+      "stress": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "mds_journal_latency_s_resid",
+        52.56016115661696,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        14.831334302847054,
+        "down"
+      ],
+      [
+        "objecter_ops_rate_resid",
+        10.112730287791834,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        6.192812263837232,
+        "up"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        2.329575313915275,
+        "up"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.13966032391735053,
+        "up"
+      ]
+    ],
+    "max_abs_z": 52.56016115661696,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5646182784625109,
+    "label": "moderate"
+  },
+  {
+    "event_id": 4,
+    "start_ts": "2025-11-04 13:23:47+00:00",
+    "end_ts": "2025-11-04 13:24:08+00:00",
+    "duration_s": 21.0,
+    "phase_mix": {
+      "stress": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "objecter_op_latency_s_resid",
+        25.856887345422262,
+        "up"
+      ],
+      [
+        "objecter_ops_rate_resid",
+        13.773873751832838,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        7.141789337454778,
+        "down"
+      ],
+      [
+        "objecter_send_bytes_rate_resid",
+        2.452705363443635,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.3371998250608416,
+        "down"
+      ],
+      [
+        "mds_heap_bytes_resid",
+        0.15977664785629045,
+        "down"
+      ]
+    ],
+    "max_abs_z": 25.856887345422262,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; rate/throughput shift vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5904011937459719,
+    "label": "moderate"
+  }
+]
