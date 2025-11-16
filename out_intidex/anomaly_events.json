@@ -1,0 +1,834 @@
+[
+  {
+    "event_id": 1,
+    "start_ts": "2025-11-11 19:20:14+00:00",
+    "end_ts": "2025-11-11 19:20:35+00:00",
+    "duration_s": 21.0,
+    "phase_mix": {
+      "base": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        7.795889606834872,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        6.169053489869461,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        4.345647045634574,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3874595582924183,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        0.9973718880965172,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.5128060400183098,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.35666983365972205,
+        "down"
+      ]
+    ],
+    "max_abs_z": 7.795889606834872,
+    "metrics_count": 3,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.3991061362392205,
+    "label": "moderate"
+  },
+  {
+    "event_id": 6,
+    "start_ts": "2025-11-11 20:26:02+00:00",
+    "end_ts": "2025-11-11 20:26:34+00:00",
+    "duration_s": 32.0,
+    "phase_mix": {
+      "stress": 5
+    },
+    "n_points": 5,
+    "metrics_top": [
+      [
+        "mds_journal_latency_s_resid",
+        12.980962197041654,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        3.9041890272853657,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.578208380960917,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.4908030950976088,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.0180485754514905,
+        "down"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.9352460850226534,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.8124967820351338,
+        "up"
+      ]
+    ],
+    "max_abs_z": 12.980962197041654,
+    "metrics_count": 5,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5504166666666667,
+    "label": "moderate"
+  },
+  {
+    "event_id": 10,
+    "start_ts": "2025-11-11 21:15:12+00:00",
+    "end_ts": "2025-11-11 21:15:43+00:00",
+    "duration_s": 31.0,
+    "phase_mix": {
+      "stress": 7
+    },
+    "n_points": 7,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        33.93015650567272,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        5.251899670734147,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        4.638911560701504,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3618922445979442,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        1.3637171614994616,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.280815499563996,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.1095719299989895,
+        "down"
+      ]
+    ],
+    "max_abs_z": 33.93015650567272,
+    "metrics_count": 7,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5845833333333333,
+    "label": "moderate"
+  },
+  {
+    "event_id": 15,
+    "start_ts": "2025-11-11 22:05:48+00:00",
+    "end_ts": "2025-11-11 22:06:29+00:00",
+    "duration_s": 41.0,
+    "phase_mix": {
+      "stress": 8
+    },
+    "n_points": 8,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        36.793935619959186,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        4.699054174750748,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        2.8053521465352285,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.6383613499898513,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.351225288959969,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.9765310858866175,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.9056904849716805,
+        "down"
+      ]
+    ],
+    "max_abs_z": 36.793935619959186,
+    "metrics_count": 8,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.6366666666666667,
+    "label": "major"
+  },
+  {
+    "event_id": 16,
+    "start_ts": "2025-11-11 22:26:13+00:00",
+    "end_ts": "2025-11-11 22:26:23+00:00",
+    "duration_s": 10.0,
+    "phase_mix": {
+      "stress": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        8.360849998655894,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        5.943222995979818,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        1.6084663039239544,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.2325323039730072,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.1702984467692379,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.44777525256513484,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.4295602912387634,
+        "up"
+      ]
+    ],
+    "max_abs_z": 8.360849998655894,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.4009630832862896,
+    "label": "moderate"
+  },
+  {
+    "event_id": 18,
+    "start_ts": "2025-11-11 23:01:01+00:00",
+    "end_ts": "2025-11-11 23:01:12+00:00",
+    "duration_s": 11.0,
+    "phase_mix": {
+      "stress": 2
+    },
+    "n_points": 2,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        26.206248054265206,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3728164652938997,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        2.1669300650526133,
+        "down"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        1.8617647544167333,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.3722802583127658,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.7686148854727233,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.7616873665206847,
+        "up"
+      ]
+    ],
+    "max_abs_z": 26.206248054265206,
+    "metrics_count": 2,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.42416666666666664,
+    "label": "moderate"
+  },
+  {
+    "event_id": 19,
+    "start_ts": "2025-11-11 23:35:10+00:00",
+    "end_ts": "2025-11-11 23:35:21+00:00",
+    "duration_s": 11.0,
+    "phase_mix": {
+      "stress": 3
+    },
+    "n_points": 3,
+    "metrics_top": [
+      [
+        "mds_journal_latency_s_resid",
+        7.503335233093632,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.8556034415287614,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        3.239704607934752,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        1.619838285961,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.522600502085546,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.547296700942619,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.12616124116957497,
+        "down"
+      ]
+    ],
+    "max_abs_z": 7.503335233093632,
+    "metrics_count": 3,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.35553339982494375,
+    "label": "moderate"
+  },
+  {
+    "event_id": 31,
+    "start_ts": "2025-11-12 00:41:00+00:00",
+    "end_ts": "2025-11-12 00:41:21+00:00",
+    "duration_s": 21.0,
+    "phase_mix": {
+      "stress": 5
+    },
+    "n_points": 5,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        7.393112369920308,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        3.867608844770803,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.549578633541393,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        1.8742762336654513,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.1128042634594784,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.7455746123405178,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.6491443577458713,
+        "down"
+      ]
+    ],
+    "max_abs_z": 7.393112369920308,
+    "metrics_count": 5,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.42250893294721076,
+    "label": "moderate"
+  },
+  {
+    "event_id": 34,
+    "start_ts": "2025-11-12 00:50:26+00:00",
+    "end_ts": "2025-11-12 00:51:20+00:00",
+    "duration_s": 54.0,
+    "phase_mix": {
+      "stress": 9
+    },
+    "n_points": 9,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        12.536284251378076,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        4.840565601876926,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3908637368050534,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        2.251610378373459,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.547124786120249,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.1079294347007052,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.4684672852048561,
+        "up"
+      ]
+    ],
+    "max_abs_z": 12.536284251378076,
+    "metrics_count": 9,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.69875,
+    "label": "major"
+  },
+  {
+    "event_id": 36,
+    "start_ts": "2025-11-12 01:00:24+00:00",
+    "end_ts": "2025-11-12 01:01:06+00:00",
+    "duration_s": 42.0,
+    "phase_mix": {
+      "stress": 7
+    },
+    "n_points": 7,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        7.3749702913810955,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        5.631850702309465,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        5.267576654080396,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3832722506469426,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        2.4076812381684243,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        1.976090524757222,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.3131398561412253,
+        "down"
+      ]
+    ],
+    "max_abs_z": 7.3749702913810955,
+    "metrics_count": 6,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5106239601983383,
+    "label": "moderate"
+  },
+  {
+    "event_id": 39,
+    "start_ts": "2025-11-12 01:05:59+00:00",
+    "end_ts": "2025-11-12 01:06:40+00:00",
+    "duration_s": 41.0,
+    "phase_mix": {
+      "stress": 8
+    },
+    "n_points": 8,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        12.620611077676198,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        6.173468590478748,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.043499655369203,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        2.0642002096475474,
+        "down"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        2.0624820511685207,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.1182682570880313,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        1.0656458125381532,
+        "down"
+      ]
+    ],
+    "max_abs_z": 12.620611077676198,
+    "metrics_count": 8,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.6366666666666667,
+    "label": "major"
+  },
+  {
+    "event_id": 42,
+    "start_ts": "2025-11-12 01:15:11+00:00",
+    "end_ts": "2025-11-12 01:15:21+00:00",
+    "duration_s": 10.0,
+    "phase_mix": {
+      "stress": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        8.470464754562679,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        3.7822008814889823,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.7328140980022644,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        0.8700461393935586,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        0.5940958310877337,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.5270352957024357,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.49644574745562964,
+        "up"
+      ]
+    ],
+    "max_abs_z": 8.470464754562679,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.4047995997430271,
+    "label": "moderate"
+  },
+  {
+    "event_id": 43,
+    "start_ts": "2025-11-12 01:30:12+00:00",
+    "end_ts": "2025-11-12 01:30:33+00:00",
+    "duration_s": 21.0,
+    "phase_mix": {
+      "stress": 6
+    },
+    "n_points": 6,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        9.544767020169552,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        6.373828753046423,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        3.8913525826045285,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.1309753613630804,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        0.6674338252911801,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        0.4023537039526016,
+        "down"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.24511851727430026,
+        "down"
+      ]
+    ],
+    "max_abs_z": 9.544767020169552,
+    "metrics_count": 6,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5165668457059343,
+    "label": "moderate"
+  },
+  {
+    "event_id": 45,
+    "start_ts": "2025-11-12 01:40:12+00:00",
+    "end_ts": "2025-11-12 01:40:44+00:00",
+    "duration_s": 32.0,
+    "phase_mix": {
+      "stress": 4
+    },
+    "n_points": 4,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        10.78083580621749,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        6.979146338032433,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.0146690188513279,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        0.6949235303683419,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        0.6407940569315042,
+        "down"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.30970456156884557,
+        "down"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.2879554231966379,
+        "down"
+      ]
+    ],
+    "max_abs_z": 10.78083580621749,
+    "metrics_count": 4,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.5316666666666666,
+    "label": "moderate"
+  },
+  {
+    "event_id": 48,
+    "start_ts": "2025-11-12 02:00:19+00:00",
+    "end_ts": "2025-11-12 02:00:50+00:00",
+    "duration_s": 31.0,
+    "phase_mix": {
+      "stress": 3
+    },
+    "n_points": 3,
+    "metrics_top": [
+      [
+        "sessions_open_resid",
+        6.8008409569018395,
+        "up"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        4.169643270154992,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.3389434966788847,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        0.9009775811703575,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        0.70547125196435,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.4729305646968407,
+        "down"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        0.22591070638312102,
+        "down"
+      ]
+    ],
+    "max_abs_z": 6.8008409569018395,
+    "metrics_count": 3,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.3976127668248977,
+    "label": "moderate"
+  },
+  {
+    "event_id": 49,
+    "start_ts": "2025-11-12 02:05:20+00:00",
+    "end_ts": "2025-11-12 02:05:40+00:00",
+    "duration_s": 20.0,
+    "phase_mix": {
+      "stress": 3
+    },
+    "n_points": 3,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        10.401285518320336,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        4.377469162405488,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        1.5242193682175238,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        1.438523484416193,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        1.3353040372695304,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        1.008039982219271,
+        "down"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        0.8139833137796538,
+        "up"
+      ]
+    ],
+    "max_abs_z": 10.401285518320336,
+    "metrics_count": 3,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.47291666666666665,
+    "label": "moderate"
+  }
+]

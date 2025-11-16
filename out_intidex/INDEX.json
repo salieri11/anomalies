@@ -1,0 +1,30 @@
+{
+  "outputs": [
+    "anomaly_summary_per_metric.csv",
+    "anomaly_summary_per_phase.csv",
+    "features_with_z.csv",
+    "anomaly_events.csv",
+    "anomaly_events.json",
+    "all_signals_anomalies_p*.png",
+    "event_E*_context.png",
+    "index.html"
+  ],
+  "params": {
+    "ewma_span": 10,
+    "z_threshold": 3.0,
+    "min_metrics_for_event": 2,
+    "max_gap_sec": 30.0,
+    "page_size": 10,
+    "baseline_files": [],
+    "stress_files": [
+      "intidex_mds_metrics.csv"
+    ],
+    "base_first_seconds": 1200.0,
+    "iforest_weight": 0.0,
+    "hybrid_thresh": 0.5,
+    "warmup_sec_per_phase": 10.0,
+    "min_duration_sec": 8.0,
+    "min_severity": 0.35
+  },
+  "events_detected": 16
+}

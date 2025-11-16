@@ -1,0 +1,17 @@
+metric,anomaly_points
+mds_rss_bytes_resid,314
+mkdir_latency_s_resid,312
+sessions_open_resid,269
+getattr_latency_s_resid,162
+mds_journal_latency_s_resid,154
+mds_reply_latency_s_resid,99
+objecter_op_latency_s_resid,24
+msgr_recv_bytes_rate_resid,0
+msgr_send_bytes_rate_resid,0
+msgr_recv_messages_rate_resid,0
+msgr_send_messages_rate_resid,0
+mds_request_rate_resid,0
+mds_reply_rate_resid,0
+objecter_send_bytes_rate_resid,0
+objecter_ops_rate_resid,0
+mds_heap_bytes_resid,0

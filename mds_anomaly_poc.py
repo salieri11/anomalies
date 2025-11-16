@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-CephFS MDS anomaly POC
-- EWMA residuals + baseline z-score
+CephFS MDS anomaly POC (rewritten with robustness patches)
+
+- EWMA residuals + baseline z-score (σ floor to avoid inf)
 - Optional hybrid per-row anomaly score with Isolation Forest
 - Warm-up suppression at phase boundaries
 - Event min-duration filter
@@ -11,6 +12,18 @@ CephFS MDS anomaly POC
 - Robust event windowing (min/max timestamps)
 - Paginated all-signals plots + per-event zooms
 - Static HTML dashboard (index.html)
+
+Patches included:
+- Robust CSV loading (skip "", dirs, non-existing)
+- Per-file summary (phase, rows, min/max timestamp)
+- σ-floor for baseline std to avoid +/-inf z-scores
+- IF runs only with non-empty baseline & features
+- Optional phase override by first X seconds when no base files provided
+
+New CLI:
+  --base-first-seconds X   # If >0 AND no base files are provided, treat the first X seconds
+                           # (from the earliest timestamp across all inputs) as 'base'; rest 'stress'.
+                           # If any base file is provided, this flag is ignored.
 """
 
 import argparse
@@ -42,25 +55,42 @@ GAUGE_COLS = ["mds_rss_bytes", "mds_heap_bytes", "sessions_open"]
 
 ALL_EXPECTED = [TIMECOL] + COUNTER_COLS + LATENCY_COLS + GAUGE_COLS
 
-# Baseline files (ONLY steady baseline)
-DEFAULT_BASE_FILES = ["mds_metrics_base.csv"]
-
-# Stress/recovery files (evaluated against baseline)
-DEFAULT_STRESS_FILES = [
-    "mds_metrics_stress.csv",
-    "mds_metrics_stress_1.csv",
-    "mds_metrics_base_1.csv",   # recovery; not used for μ/σ
-]
+# Defaults: can be empty; behavior is governed by CLI
+DEFAULT_BASE_FILES = []          # intentionally empty now
+DEFAULT_STRESS_FILES = []        # intentionally empty now
 
 # -----------------------------
-# Loading & preprocessing
+# Helpers
 # -----------------------------
+def _parse_timestamp_col(series: pd.Series) -> pd.Series:
+    """Robustly parse timestamps that may be UNIX (s/ms) or ISO8601 strings."""
+    s = series.copy()
+
+    # Already datetime?
+    if np.issubdtype(s.dtype, np.datetime64):
+        return pd.to_datetime(s, utc=True, errors="coerce")
+
+    # Try numeric epoch
+    try:
+        s_num = pd.to_numeric(s, errors="coerce")
+        if s_num.notna().any():
+            mx = s_num.max()
+            if mx > 1e14:   # likely µs/ns; fall back to ISO parse
+                raise ValueError
+            unit = "ms" if mx > 1e11 else "s"
+            return pd.to_datetime(s_num, unit=unit, utc=True, errors="coerce")
+    except Exception:
+        pass
+
+    # ISO8601 fallback
+    return pd.to_datetime(s, utc=True, errors="coerce")
+
 def load_csv(path: Path, label: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     df.columns = [c.strip().strip('"') for c in df.columns]
     if TIMECOL not in df.columns:
         raise ValueError(f"{path} has no '{TIMECOL}' column. Columns={df.columns.tolist()}")
-    df[TIMECOL] = pd.to_datetime(df[TIMECOL], utc=True, errors="coerce")
+    df[TIMECOL] = _parse_timestamp_col(df[TIMECOL])
     df = df.dropna(subset=[TIMECOL]).sort_values(TIMECOL).reset_index(drop=True)
     df["phase"] = label
     return df
@@ -68,7 +98,10 @@ def load_csv(path: Path, label: str) -> pd.DataFrame:
 def to_rates(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     dt = df[TIMECOL].diff().dt.total_seconds()
-    dt.iloc[0] = np.nan
+    # Avoid chained assignment warning by using .loc
+    dt = dt.astype("float64")
+    if len(dt) > 0:
+        dt.iloc[0] = np.nan
     for col in COUNTER_COLS:
         if col in df.columns:
             diff = df[col].diff()
@@ -101,10 +134,16 @@ def zscore_against_baseline(all_df: pd.DataFrame, baseline_mask: pd.Series, use_
         metric_cols = [c for c in all_df.columns if c.endswith("_resid")]
     else:
         metric_cols = [c for c in all_df.columns if c not in (TIMECOL, "phase") and not c.endswith("_ewm")]
+
     base = all_df.loc[baseline_mask, metric_cols]
+    # μ & σ, with σ floor (avoid inf / divide-by-zero)
     mu = base.mean(skipna=True)
-    sigma = base.std(skipna=True).replace(0, np.nan)
+    sigma = base.std(skipna=True)
+    sigma = sigma.mask((sigma < 1e-12) | (sigma.isna()))  # tiny/NaN std treated as missing
+
     z = (all_df[metric_cols] - mu) / sigma
+    z = z.replace([np.inf, -np.inf], np.nan)
+
     return metric_cols, z, mu, sigma
 
 def anomaly_summary(phased_df: pd.DataFrame, metric_cols, z: pd.DataFrame, thresh: float):
@@ -121,6 +160,9 @@ def try_isolation_forest(train_df: pd.DataFrame, test_df: pd.DataFrame, metric_c
         mu = train_df[metric_cols].mean()
         X_train = train_df[metric_cols].fillna(mu)
         X_test  = test_df[metric_cols].fillna(mu)
+        if len(X_train) == 0 or len(X_test) == 0 or len(metric_cols) == 0:
+            print("[IForest] Skipping (no data/features).")
+            return None
         model = IsolationForest(
             n_estimators=200,
             contamination="auto",
@@ -178,10 +220,6 @@ def build_anomaly_events(
     suppress_mask: pd.Series | None = None,
     min_duration_sec: float = 0.0
 ):
-    """
-    if iforest_weight == 0.0: z-based rule (>= min_metrics metrics exceed |z|>zth)
-    else: hybrid row_score = (1-w)*z_norm + w*iforest_norm; row anomalous if row_score > hybrid_thresh
-    """
     ts = feat[TIMECOL].reset_index(drop=True)
     phases = feat["phase"].reset_index(drop=True)
 
@@ -210,7 +248,7 @@ def build_anomaly_events(
     if suppress_mask is not None:
         anom_row_mask = anom_row_mask & (~suppress_mask)
 
-    # Persist helpful columns for later analysis/export
+    # Persist helpful columns
     feat["z_anom_count"] = z_anom_count
     feat["z_norm"] = z_norm
     if "iforest_score" in feat.columns:
@@ -231,14 +269,12 @@ def build_anomaly_events(
             start_ts, end_ts = end_ts, start_ts
             duration = abs(duration)
         if duration < min_duration_sec:
-            return  # drop short micro-bursts
+            return
 
         n_points = len(idxs)
         zwin = z.iloc[idxs][metric_cols]
-        # Per-metric max |z| in window (desc)
         max_abs = zwin.abs().max().sort_values(ascending=False)
 
-        # Clean top list (skip NaNs) up to 8
         top = []
         for m in max_abs.index.tolist():
             mvals = zwin[m].values
@@ -266,12 +302,11 @@ def build_anomaly_events(
             reason_bits.append("multi-metric deviation vs baseline")
         reasoning = "; ".join(reason_bits)
 
-        # Severity scoring
         breadth = int((zwin.abs() > zth).sum().max())
         breadth_norm = breadth / max(1, len(metric_cols))
         mag = float(max_abs.iloc[0]) if len(max_abs) else 0.0
-        mag_norm = min(mag / 10.0, 1.0)           # soft cap 10σ
-        dur_norm = min(duration / 60.0, 1.0)      # saturate ~60s
+        mag_norm = min(mag / 10.0, 1.0)
+        dur_norm = min(duration / 60.0, 1.0)
         consist = float(feat.loc[idxs, "hybrid_score"].mean()) if "hybrid_score" in feat.columns else 0.0
         consist_norm = max(0.0, min(consist, 1.0))
         severity = 0.35 * mag_norm + 0.30 * breadth_norm + 0.20 * dur_norm + 0.15 * consist_norm
@@ -513,6 +548,8 @@ def main():
     ap = argparse.ArgumentParser(description="CephFS MDS anomaly POC (EWMA + z / hybrid IF + events + severity + HTML)")
     ap.add_argument("--base", nargs="*", default=DEFAULT_BASE_FILES, help="Baseline CSVs")
     ap.add_argument("--stress", nargs="*", default=DEFAULT_STRESS_FILES, help="Stress/recovery CSVs")
+    ap.add_argument("--base-first-seconds", type=float, default=0.0,
+                    help="If >0 AND no base files are provided, tag the first X seconds (from earliest timestamp across all CSVs) as 'base' and the rest as 'stress'. Ignored if any base file is provided.")
     ap.add_argument("--ewma-span", type=int, default=10, help="EWMA span (samples)")
     ap.add_argument("--zth", type=float, default=3.0, help="Z-score threshold")
     ap.add_argument("--topn", type=int, default=6, help="How many metrics to plot individually")
@@ -530,42 +567,80 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Load CSVs
+    # -----------------------------
+    # Load CSVs (robust)
+    # -----------------------------
     frames = []
-    for fname in args.base:
-        p = Path(fname)
-        if p.exists(): frames.append(load_csv(p, "base"))
-        else: print(f"WARNING: missing baseline file: {p}")
-    for fname in args.stress:
-        p = Path(fname)
-        if p.exists(): frames.append(load_csv(p, "stress"))
-        else: print(f"WARNING: missing stress/recovery file: {p}")
+    def _add_files(file_list, label):
+        added = 0
+        for fname in file_list:
+            if not fname:
+                continue
+            p = Path(fname)
+            if p.is_dir():
+                print(f"WARNING: '{p}' is a directory; skipping.")
+                continue
+            if not p.is_file():
+                print(f"WARNING: file not found: {p}")
+                continue
+            df = load_csv(p, label)
+            frames.append(df)
+            added += 1
+        return added
+
+    n_base = _add_files(args.base, "base")
+    n_stress = _add_files(args.stress, "stress")
 
     if not frames:
-        raise SystemExit("No CSVs found. Place your CSVs next to this script and rerun.")
+        raise SystemExit("No CSVs found. Provide --base/--stress files or a single prod CSV.")
 
-    # Concat, keep expected cols + phase, global sort
+    print("[Files]")
+    for i, df in enumerate(frames):
+        phase0 = df["phase"].iloc[0] if len(df) else "?"
+        print(f"  #{i:02d} phase={phase0:5s} rows={len(df):6d} min={df[TIMECOL].min()} max={df[TIMECOL].max()}")
+
+    # -----------------------------
+    # Concat & (optional) phase override by first X seconds
+    # -----------------------------
     raw = pd.concat(frames, ignore_index=True)
     cols_present = [c for c in ALL_EXPECTED if c in raw.columns]
-    raw = raw[cols_present + ["phase"]]
-    raw = raw.sort_values(TIMECOL).reset_index(drop=True)
+    raw = raw[cols_present + ["phase"]].sort_values(TIMECOL).reset_index(drop=True)
 
+    if n_base == 0 and args.base_first_seconds > 0:
+        t0 = raw[TIMECOL].min()
+        cutoff = t0 + pd.Timedelta(seconds=args.base_first_seconds)
+        raw["phase"] = np.where(raw[TIMECOL] <= cutoff, "base", "stress")
+        print(f"[PhaseOverride] No base files provided; assigned 'base' to first {args.base_first_seconds} seconds "
+              f"({t0.isoformat()} .. {cutoff.isoformat()}), rest as 'stress'.")
+    else:
+        if n_base > 0 and args.base_first_seconds > 0:
+            print("[PhaseOverride] Ignored --base-first-seconds because base files were provided.")
+
+    # -----------------------------
     # Prepare features
+    # -----------------------------
     feat = prepare_features(raw, ewma_span=args.ewma_span)
 
-    # Strict temporal order (belt-and-suspenders)
+    # Strict temporal order
     ord_idx = feat[TIMECOL].argsort().values
     feat = feat.iloc[ord_idx].reset_index(drop=True)
 
     # Baseline mask
     baseline_mask = feat["phase"] == "base"
+    n_base_rows = int(baseline_mask.sum())
+    print(f"[Baseline] rows={n_base_rows}")
 
+    # -----------------------------
     # Z-scores vs baseline
+    # -----------------------------
     metric_cols, z, mu, sigma = zscore_against_baseline(feat, baseline_mask, use_residuals=True)
+    # Align length (belt-and-suspenders)
     if len(z) != len(feat):
-        z = z.iloc[ord_idx].reset_index(drop=True)
+        z = z.reindex_like(feat[metric_cols])
 
-    # Warm-up suppression after phase changes
+    # -----------------------------
+    # Optional warm-up suppression after phase flips
+    # -----------------------------
     warmup_mask = pd.Series(False, index=feat.index)
     if args.warmup_sec_per_phase > 0:
         flips = feat.index[feat["phase"] != feat["phase"].shift(1)]
@@ -574,24 +649,32 @@ def main():
             warm = (feat[TIMECOL] >= t0) & (feat[TIMECOL] <= t0 + pd.Timedelta(seconds=args.warmup_sec_per_phase))
             warmup_mask |= warm
 
+    # -----------------------------
     # Summaries (z-based)
+    # -----------------------------
     per_metric, per_phase, _ = anomaly_summary(feat[[TIMECOL, "phase"]], metric_cols, z, args.zth)
-    per_metric.to_frame().reset_index().rename(columns={"index": "metric"}).to_csv(outdir / "anomaly_summary_per_metric.csv", index=False)
+    outdir.joinpath("anomaly_summary_per_metric.csv").write_text(
+        pd.DataFrame({"metric": per_metric.index, "anomaly_points": per_metric.values}).to_csv(index=False)
+    )
     per_phase.to_csv(outdir / "anomaly_summary_per_phase.csv", header=True)
 
-    # Isolation Forest (optional)
+    # -----------------------------
+    # Isolation Forest (optional + trained on baseline rows)
+    # -----------------------------
     iforest_score = None
-    try:
+    if n_base_rows > 0 and len(metric_cols) > 0:
         train_df = feat.loc[baseline_mask, metric_cols]
         test_df  = feat.loc[:, metric_cols]
         iforest_score = try_isolation_forest(train_df, test_df, metric_cols)
         if iforest_score is not None:
             feat["iforest_score"] = np.nan
             feat.loc[:, "iforest_score"] = iforest_score
-    except Exception as e:
-        print(f"[IForest] Error: {e}")
+    else:
+        print("[IForest] Skipping (empty baseline or no features).")
 
+    # -----------------------------
     # Build events (hybrid if requested)
+    # -----------------------------
     events = build_anomaly_events(
         feat, z, metric_cols,
         zth=args.zth,
@@ -661,6 +744,7 @@ def main():
             "page_size": args.page_size,
             "baseline_files": args.base,
             "stress_files": args.stress,
+            "base_first_seconds": args.base_first_seconds,
             "iforest_weight": args.iforest_weight,
             "hybrid_thresh": args.hybrid_thresh,
             "warmup_sec_per_phase": args.warmup_sec_per_phase,

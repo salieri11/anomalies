@@ -1,0 +1,106 @@
+[
+  {
+    "event_id": 5,
+    "start_ts": "2025-11-12 00:41:00+00:00",
+    "end_ts": "2025-11-12 00:41:11+00:00",
+    "duration_s": 11.0,
+    "phase_mix": {
+      "stress": 3
+    },
+    "n_points": 3,
+    "metrics_top": [
+      [
+        "mkdir_latency_s_resid",
+        7.393112369920308,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        3.867608844770803,
+        "up"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.549578633541393,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        1.8742762336654513,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        1.1128042634594784,
+        "down"
+      ],
+      [
+        "mds_rss_bytes_resid",
+        0.6491443577458713,
+        "down"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.2601236792646616,
+        "up"
+      ]
+    ],
+    "max_abs_z": 7.393112369920308,
+    "metrics_count": 3,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.4626995585768725,
+    "label": "moderate"
+  },
+  {
+    "event_id": 7,
+    "start_ts": "2025-11-12 01:00:45+00:00",
+    "end_ts": "2025-11-12 01:00:55+00:00",
+    "duration_s": 10.0,
+    "phase_mix": {
+      "stress": 2
+    },
+    "n_points": 2,
+    "metrics_top": [
+      [
+        "mds_rss_bytes_resid",
+        7.3749702913810955,
+        "up"
+      ],
+      [
+        "mkdir_latency_s_resid",
+        5.631850702309465,
+        "up"
+      ],
+      [
+        "sessions_open_resid",
+        3.7560236565781007,
+        "down"
+      ],
+      [
+        "mds_reply_latency_s_resid",
+        3.259815034356352,
+        "up"
+      ],
+      [
+        "mds_journal_latency_s_resid",
+        1.5851995719818774,
+        "up"
+      ],
+      [
+        "getattr_latency_s_resid",
+        1.3693195800533233,
+        "up"
+      ],
+      [
+        "objecter_op_latency_s_resid",
+        0.7701116098097849,
+        "down"
+      ]
+    ],
+    "max_abs_z": 7.3749702913810955,
+    "metrics_count": 2,
+    "reasoning": "widespread latency elevation vs baseline; resource pressure (memory/sessions)",
+    "severity": 0.4488012505879746,
+    "label": "moderate"
+  }
+]
