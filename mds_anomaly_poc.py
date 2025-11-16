@@ -2,15 +2,21 @@
 # -*- coding: utf-8 -*-
 
 """
-CephFS MDS anomaly POC
-- EWMA residuals + baseline z-score
-- Optional hybrid per-row anomaly score with Isolation Forest
+CephFS MDS anomaly POC (EWMA + z-score + optional IF + alerts)
+
+- EWMA residuals + baseline z-score (σ floor to avoid inf)
+- Optional IsolationForest score (used only in severity)
 - Warm-up suppression at phase boundaries
-- Event min-duration filter
+- Subevents: short anomalies (row groups)
+- Alerts: longer "hot periods" grouping subevents
+- Alert lifecycle logging to alerts_output.json (JSON lines)
 - Event severity score + label
-- Robust event windowing (min/max timestamps)
 - Paginated all-signals plots + per-event zooms
 - Static HTML dashboard (index.html)
+
+Baselines:
+- Either explicit baseline CSVs via --base
+- Or the first --base-first-seconds of the trace (if no base files supplied)
 """
 
 import argparse
@@ -37,44 +43,63 @@ LATENCY_COLS = [
     "mds_journal_latency_s", "objecter_op_latency_s",
 ]
 
-# Add host CPU gauges here if you include them in CSVs (e.g., "cpu_user_pct", "cpu_sys_pct")
 GAUGE_COLS = ["mds_rss_bytes", "mds_heap_bytes", "sessions_open"]
 
 ALL_EXPECTED = [TIMECOL] + COUNTER_COLS + LATENCY_COLS + GAUGE_COLS
 
-# Baseline files (ONLY steady baseline)
-DEFAULT_BASE_FILES = ["mds_metrics_base.csv"]
+DEFAULT_BASE_FILES = []
+DEFAULT_STRESS_FILES = []
 
-# Stress/recovery files (evaluated against baseline)
-DEFAULT_STRESS_FILES = [
-    "mds_metrics_stress.csv",
-    "mds_metrics_stress_1.csv",
-    "mds_metrics_base_1.csv",   # recovery; not used for μ/σ
-]
 
 # -----------------------------
 # Loading & preprocessing
 # -----------------------------
+def _parse_timestamp_col(series: pd.Series) -> pd.Series:
+    """Robustly parse timestamps that may be UNIX (s/ms) or ISO8601 strings."""
+    s = series.copy()
+
+    if np.issubdtype(s.dtype, np.datetime64):
+        return pd.to_datetime(s, utc=True, errors="coerce")
+
+    # Try numeric epoch
+    try:
+        s_num = pd.to_numeric(s, errors="coerce")
+        if s_num.notna().any():
+            mx = s_num.max()
+            if mx > 1e14:  # probably µs/ns, treat as invalid here
+                raise ValueError
+            unit = "ms" if mx > 1e11 else "s"
+            return pd.to_datetime(s_num, unit=unit, utc=True, errors="coerce")
+    except Exception:
+        pass
+
+    # Fallback: ISO8601
+    return pd.to_datetime(s, utc=True, errors="coerce")
+
+
 def load_csv(path: Path, label: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     df.columns = [c.strip().strip('"') for c in df.columns]
     if TIMECOL not in df.columns:
         raise ValueError(f"{path} has no '{TIMECOL}' column. Columns={df.columns.tolist()}")
-    df[TIMECOL] = pd.to_datetime(df[TIMECOL], utc=True, errors="coerce")
+    df[TIMECOL] = _parse_timestamp_col(df[TIMECOL])
     df = df.dropna(subset=[TIMECOL]).sort_values(TIMECOL).reset_index(drop=True)
     df["phase"] = label
     return df
 
+
 def to_rates(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    dt = df[TIMECOL].diff().dt.total_seconds()
-    dt.iloc[0] = np.nan
+    dt = df[TIMECOL].diff().dt.total_seconds().astype("float64")
+    if len(dt) > 0:
+        dt.iloc[0] = np.nan
     for col in COUNTER_COLS:
         if col in df.columns:
             diff = df[col].diff()
-            diff = diff.where(diff >= 0, np.nan)   # guard against counter reset
+            diff = diff.where(diff >= 0, np.nan)  # guard against counter reset
             df[col + "_rate"] = diff / dt
     return df
+
 
 def ewma(df: pd.DataFrame, cols, span: int) -> pd.DataFrame:
     out = {}
@@ -85,6 +110,7 @@ def ewma(df: pd.DataFrame, cols, span: int) -> pd.DataFrame:
             out[c + "_resid"] = df[c] - ewm
     return pd.DataFrame(out)
 
+
 def prepare_features(df: pd.DataFrame, ewma_span: int) -> pd.DataFrame:
     df = to_rates(df)
     rate_cols = [c + "_rate" for c in COUNTER_COLS if c in df.columns]
@@ -92,6 +118,7 @@ def prepare_features(df: pd.DataFrame, ewma_span: int) -> pd.DataFrame:
     ewm_resid = ewma(df, keep_cols, span=ewma_span)
     feat = pd.concat([df[[TIMECOL, "phase"] + keep_cols], ewm_resid], axis=1)
     return feat
+
 
 # -----------------------------
 # Scoring
@@ -101,11 +128,16 @@ def zscore_against_baseline(all_df: pd.DataFrame, baseline_mask: pd.Series, use_
         metric_cols = [c for c in all_df.columns if c.endswith("_resid")]
     else:
         metric_cols = [c for c in all_df.columns if c not in (TIMECOL, "phase") and not c.endswith("_ewm")]
+
     base = all_df.loc[baseline_mask, metric_cols]
     mu = base.mean(skipna=True)
-    sigma = base.std(skipna=True).replace(0, np.nan)
+    sigma = base.std(skipna=True)
+    sigma = sigma.mask((sigma < 1e-12) | (sigma.isna()))
+
     z = (all_df[metric_cols] - mu) / sigma
+    z = z.replace([np.inf, -np.inf], np.nan)
     return metric_cols, z, mu, sigma
+
 
 def anomaly_summary(phased_df: pd.DataFrame, metric_cols, z: pd.DataFrame, thresh: float):
     anom = z.abs() > thresh
@@ -115,12 +147,21 @@ def anomaly_summary(phased_df: pd.DataFrame, metric_cols, z: pd.DataFrame, thres
     per_phase = phased_df.groupby("phase")["any_anomaly"].sum().rename("phase_anomaly_points")
     return per_metric, per_phase, anom
 
+
 def try_isolation_forest(train_df: pd.DataFrame, test_df: pd.DataFrame, metric_cols):
     try:
         from sklearn.ensemble import IsolationForest
+    except Exception as e:
+        print(f"[IForest] Skipping (sklearn not available: {e})")
+        return None
+
+    try:
         mu = train_df[metric_cols].mean()
         X_train = train_df[metric_cols].fillna(mu)
-        X_test  = test_df[metric_cols].fillna(mu)
+        X_test = test_df[metric_cols].fillna(mu)
+        if len(X_train) == 0 or len(X_test) == 0 or len(metric_cols) == 0:
+            print("[IForest] Skipping (no data/features).")
+            return None
         model = IsolationForest(
             n_estimators=200,
             contamination="auto",
@@ -134,8 +175,9 @@ def try_isolation_forest(train_df: pd.DataFrame, test_df: pd.DataFrame, metric_c
         print(f"[IForest] Skipping IsolationForest (reason: {e})")
         return None
 
+
 # -----------------------------
-# Events
+# Subevents (row-anomaly groups)
 # -----------------------------
 @dataclass
 class AnomalyEvent:
@@ -152,6 +194,7 @@ class AnomalyEvent:
     severity: float
     label: str
 
+
 def _metric_kind(name: str) -> str:
     base = name.replace("_resid", "")
     if base.endswith("_latency_s"):
@@ -162,9 +205,12 @@ def _metric_kind(name: str) -> str:
         return "resource"
     return "other"
 
+
 def _direction(zval: float) -> str:
-    if pd.isna(zval): return "unknown"
+    if pd.isna(zval):
+        return "unknown"
     return "up" if zval > 0 else "down"
+
 
 def build_anomaly_events(
     feat: pd.DataFrame,
@@ -173,49 +219,26 @@ def build_anomaly_events(
     zth: float = 3.0,
     min_metrics: int = 2,
     max_gap_sec: float = 30.0,
-    iforest_weight: float = 0.0,
-    hybrid_thresh: float = 0.5,
     suppress_mask: pd.Series | None = None,
-    min_duration_sec: float = 0.0
+    min_duration_sec: float = 0.0,
 ):
     """
-    if iforest_weight == 0.0: z-based rule (>= min_metrics metrics exceed |z|>zth)
-    else: hybrid row_score = (1-w)*z_norm + w*iforest_norm; row anomalous if row_score > hybrid_thresh
+    Build "subevents" from row-level anomalies.
+    Row-level anomaly condition (z-only):
+      z_anom_count >= min_metrics  where z_anom_count = #metrics with |z| > zth
+    Rows are grouped into subevents if gap <= max_gap_sec.
     """
     ts = feat[TIMECOL].reset_index(drop=True)
     phases = feat["phase"].reset_index(drop=True)
 
-    # z-based count + normalization
+    # Count how many metrics exceed threshold per row
     z_anom_count = (z[metric_cols].abs() > zth).sum(axis=1)
-    if z_anom_count.max() > z_anom_count.min():
-        z_norm = (z_anom_count - z_anom_count.min()) / (z_anom_count.max() - z_anom_count.min())
-    else:
-        z_norm = pd.Series(0.0, index=z_anom_count.index)
+    feat["z_anom_count"] = z_anom_count
 
-    # Isolation Forest normalization
-    if "iforest_score" in feat.columns and iforest_weight > 0.0:
-        ifo = feat["iforest_score"]
-        if ifo.max() > ifo.min():
-            iforest_norm = (ifo - ifo.min()) / (ifo.max() - ifo.min())
-        else:
-            iforest_norm = pd.Series(0.0, index=ifo.index)
-        hybrid_score = (1 - iforest_weight) * z_norm + iforest_weight * iforest_norm
-        anom_row_mask = hybrid_score > hybrid_thresh
-    else:
-        hybrid_score = pd.Series(0.0, index=z_norm.index)
-        iforest_norm = pd.Series(0.0, index=z_norm.index)
-        anom_row_mask = z_anom_count >= min_metrics
-
-    # Optional suppression (e.g., warm-up after phase change)
+    # Optional suppression (warmup)
+    anom_row_mask = z_anom_count >= min_metrics
     if suppress_mask is not None:
         anom_row_mask = anom_row_mask & (~suppress_mask)
-
-    # Persist helpful columns for later analysis/export
-    feat["z_anom_count"] = z_anom_count
-    feat["z_norm"] = z_norm
-    if "iforest_score" in feat.columns:
-        feat["iforest_norm"] = iforest_norm
-    feat["hybrid_score"] = hybrid_score
 
     anom_idx = np.flatnonzero(anom_row_mask.to_numpy())
     events = []
@@ -225,20 +248,18 @@ def build_anomaly_events(
     def flush(group, evt_id):
         idxs = np.array(group)
         start_ts = ts.iloc[idxs].min()
-        end_ts   = ts.iloc[idxs].max()
+        end_ts = ts.iloc[idxs].max()
         duration = (end_ts - start_ts).total_seconds()
         if duration < 0:
             start_ts, end_ts = end_ts, start_ts
             duration = abs(duration)
         if duration < min_duration_sec:
-            return  # drop short micro-bursts
+            return
 
         n_points = len(idxs)
         zwin = z.iloc[idxs][metric_cols]
-        # Per-metric max |z| in window (desc)
         max_abs = zwin.abs().max().sort_values(ascending=False)
 
-        # Clean top list (skip NaNs) up to 8
         top = []
         for m in max_abs.index.tolist():
             mvals = zwin[m].values
@@ -266,15 +287,28 @@ def build_anomaly_events(
             reason_bits.append("multi-metric deviation vs baseline")
         reasoning = "; ".join(reason_bits)
 
-        # Severity scoring
         breadth = int((zwin.abs() > zth).sum().max())
         breadth_norm = breadth / max(1, len(metric_cols))
         mag = float(max_abs.iloc[0]) if len(max_abs) else 0.0
-        mag_norm = min(mag / 10.0, 1.0)           # soft cap 10σ
-        dur_norm = min(duration / 60.0, 1.0)      # saturate ~60s
-        consist = float(feat.loc[idxs, "hybrid_score"].mean()) if "hybrid_score" in feat.columns else 0.0
-        consist_norm = max(0.0, min(consist, 1.0))
-        severity = 0.35 * mag_norm + 0.30 * breadth_norm + 0.20 * dur_norm + 0.15 * consist_norm
+        mag_norm = min(mag / 10.0, 1.0)
+        dur_norm = min(duration / 60.0, 1.0)
+
+        # Optional IF contribution (if present)
+        if "iforest_score" in feat.columns:
+            ifo_vals = feat.loc[idxs, "iforest_score"]
+            if ifo_vals.max() > ifo_vals.min():
+                iforest_norm = (ifo_vals.mean() - ifo_vals.min()) / (ifo_vals.max() - ifo_vals.min())
+            else:
+                iforest_norm = 0.0
+        else:
+            iforest_norm = 0.0
+
+        severity = (
+            0.35 * mag_norm +
+            0.30 * breadth_norm +
+            0.20 * dur_norm +
+            0.15 * iforest_norm
+        )
         label = "major" if severity >= 0.60 else ("moderate" if severity >= 0.35 else "minor")
 
         ev = AnomalyEvent(
@@ -297,15 +331,17 @@ def build_anomaly_events(
     group = [anom_idx[0]]
     for i in range(1, len(anom_idx)):
         prev_i = anom_idx[i - 1]
-        cur_i  = anom_idx[i]
+        cur_i = anom_idx[i]
         gap = (ts.iloc[cur_i] - ts.iloc[prev_i]).total_seconds()
         if gap <= max_gap_sec:
             group.append(cur_i)
         else:
-            flush(group, evt_id); evt_id += 1
+            flush(group, evt_id)
+            evt_id += 1
             group = [cur_i]
     flush(group, evt_id)
     return events
+
 
 def save_anomaly_events(events, outdir: Path):
     if not events:
@@ -316,15 +352,226 @@ def save_anomaly_events(events, outdir: Path):
     for e in events:
         row = asdict(e)
         row["start_ts"] = e.start_ts.isoformat()
-        row["end_ts"]   = e.end_ts.isoformat()
+        row["end_ts"] = e.end_ts.isoformat()
         row["metrics_top"] = ";".join([f"{m}:{z:.1f}:{d}" for (m, z, d) in e.metrics_top])
         rows.append(row)
     pd.DataFrame(rows).to_csv(outdir / "anomaly_events.csv", index=False)
     with open(outdir / "anomaly_events.json", "w") as f:
         json.dump([asdict(e) for e in events], f, indent=2, default=str)
 
+
 # -----------------------------
-# Plotting (matplotlib only)
+# Alerts (groups of subevents)
+# -----------------------------
+@dataclass
+class Alert:
+    alert_id: int
+    start_ts: pd.Timestamp
+    end_ts: pd.Timestamp
+    duration_s: float
+    n_subevents: int
+    n_points: int
+    phase_mix: dict
+    max_abs_z: float
+    max_severity: float
+    label: str          # major / moderate / minor
+    metrics_top: list   # [(metric, max_abs_z, direction), ...]
+    subevent_ids: list  # list of event_id inside this alert
+
+
+def _alert_aggregate_from_group(group, alert_id: int):
+    """Aggregate a list of AnomalyEvent into Alert-level stats (without subevents list)."""
+    start_ts = min(e.start_ts for e in group)
+    end_ts = max(e.end_ts for e in group)
+    duration = (end_ts - start_ts).total_seconds()
+    n_subevents = len(group)
+    n_points = sum(e.n_points for e in group)
+
+    phase_mix = {}
+    for e in group:
+        for k, v in e.phase_mix.items():
+            phase_mix[k] = phase_mix.get(k, 0) + v
+
+    max_abs_z = max(e.max_abs_z for e in group)
+    max_severity = max(e.severity for e in group)
+    labels = {e.label for e in group}
+    if "major" in labels:
+        label = "major"
+    elif "moderate" in labels:
+        label = "moderate"
+    else:
+        label = "minor"
+
+    metric_best = {}
+    for e in group:
+        for m, z, d in e.metrics_top:
+            if m not in metric_best or z > metric_best[m][0]:
+                metric_best[m] = (z, d)
+    metrics_top = sorted(
+        [(m, z, d) for m, (z, d) in metric_best.items()],
+        key=lambda t: t[1],
+        reverse=True
+    )[:10]
+
+    sub_ids = [e.event_id for e in group]
+
+    ep = Alert(
+        alert_id=alert_id,
+        start_ts=start_ts,
+        end_ts=end_ts,
+        duration_s=duration,
+        n_subevents=n_subevents,
+        n_points=n_points,
+        phase_mix=phase_mix,
+        max_abs_z=max_abs_z,
+        max_severity=max_severity,
+        label=label,
+        metrics_top=metrics_top,
+        subevent_ids=sub_ids,
+    )
+    return ep
+
+
+def _serialize_subevent(e: AnomalyEvent) -> dict:
+    """Turn a subevent into a dict suitable for embedding inside the closed alert."""
+    return {
+        "event_id": e.event_id,
+        "start_ts": e.start_ts,
+        "end_ts": e.end_ts,
+        "duration_s": e.duration_s,
+        "phase_mix": e.phase_mix,
+        "n_points": e.n_points,
+        "max_abs_z": e.max_abs_z,
+        "metrics_count": e.metrics_count,
+        "severity": e.severity,
+        "label": e.label,
+        "reasoning": e.reasoning,
+        "metrics_top": e.metrics_top,
+    }
+
+
+def build_alerts(subevents, alert_gap_sec: float, log_path: Path | None = None):
+    """
+    Group subevents (AnomalyEvent) into higher-level alerts.
+
+    Logging semantics (JSON lines to log_path, if given):
+
+      - On first detection of an alert:
+        status: "new"
+        -> single line with alert summary based on current subevents (usually 1),
+           including metrics_top etc, but WITHOUT embedded subevents list.
+
+      - When alert is closed:
+        status: "closed"
+        -> single line with full alert summary AND
+           `subevents`: [ all subevents in that alert, serialized ].
+
+    Example JSON lines:
+
+      {"status":"new",    "alert_id":6, ...}
+      {"status":"closed", "alert_id":6, "subevents":[{...},{...}], ...}
+    """
+    if not subevents:
+        if log_path is not None:
+            # ensure file exists (even empty)
+            log_path.write_text("", encoding="utf-8")
+        return []
+
+    subevents = sorted(subevents, key=lambda e: e.start_ts)
+    alerts = []
+    alert_id = 1
+
+    log_f = None
+
+    def log_record(rec: dict):
+        nonlocal log_f
+        if log_path is None:
+            return
+        if log_f is None:
+            log_f = log_path.open("w", encoding="utf-8")
+        json.dump(rec, log_f, default=str)
+        log_f.write("\n")
+        log_f.flush()
+
+    def log_alert_status(status: str, group, eid: int):
+        """Log 'new' or 'closed' record for the given alert group."""
+        ep = _alert_aggregate_from_group(group, eid)
+        rec = {
+            "status": status,              # "new" or "closed"
+            "alert_id": ep.alert_id,
+            "start_ts": ep.start_ts,
+            "end_ts": ep.end_ts,
+            "duration_s": ep.duration_s,
+            "n_subevents": ep.n_subevents,
+            "n_points": ep.n_points,
+            "phase_mix": ep.phase_mix,
+            "max_abs_z": ep.max_abs_z,
+            "max_severity": ep.max_severity,
+            "label": ep.label,
+            "metrics_top": ep.metrics_top,
+        }
+        if status == "closed":
+            # include all subevents only on close
+            rec["subevents"] = [_serialize_subevent(e) for e in group]
+        log_record(rec)
+
+    def start_alert(first: AnomalyEvent, eid: int):
+        group = [first]
+        # "new" alert appears as soon as first subevent is detected
+        log_alert_status("new", group, eid)
+        return group
+
+    def close_alert(group, eid: int):
+        # "closed" alert with full set of subevents
+        log_alert_status("closed", group, eid)
+        return _alert_aggregate_from_group(group, eid)
+
+    # First alert
+    cur_group = start_alert(subevents[0], alert_id)
+
+    for sub in subevents[1:]:
+        prev = cur_group[-1]
+        gap = (sub.start_ts - prev.end_ts).total_seconds()
+        if gap <= alert_gap_sec:
+            # same alert, just extend group
+            cur_group.append(sub)
+            # we intentionally DO NOT log "ongoing" / "subevent_added" here
+            # (you only wanted "new" + "closed").
+        else:
+            # close previous alert & log "closed"
+            alerts.append(close_alert(cur_group, alert_id))
+            alert_id += 1
+            # start a new one & log "new"
+            cur_group = start_alert(sub, alert_id)
+
+    # Close last alert
+    alerts.append(close_alert(cur_group, alert_id))
+
+    if log_f is not None:
+        log_f.close()
+
+    return alerts
+
+def save_alerts(alerts, outdir: Path):
+    if not alerts:
+        pd.DataFrame().to_csv(outdir / "alerts.csv", index=False)
+        (outdir / "alerts.json").write_text("[]")
+        return
+    rows = []
+    for ep in alerts:
+        row = asdict(ep)
+        row["start_ts"] = ep.start_ts.isoformat()
+        row["end_ts"] = ep.end_ts.isoformat()
+        row["metrics_top"] = ";".join([f"{m}:{z:.1f}:{d}" for (m, z, d) in ep.metrics_top])
+        row["subevent_ids"] = ",".join(str(i) for i in ep.subevent_ids)
+        rows.append(row)
+    pd.DataFrame(rows).to_csv(outdir / "alerts.csv", index=False)
+    with open(outdir / "alerts.json", "w") as f:
+        json.dump([asdict(ep) for ep in alerts], f, indent=2, default=str)
+
+
+# -----------------------------
+# Plotting
 # -----------------------------
 def plot_metric_series(df: pd.DataFrame, metric: str, outdir: Path, title_suffix: str = ""):
     import matplotlib.pyplot as plt
@@ -337,6 +584,7 @@ def plot_metric_series(df: pd.DataFrame, metric: str, outdir: Path, title_suffix
     fig.autofmt_xdate()
     fig.savefig(outdir / f"{metric}.png", dpi=140, bbox_inches="tight")
     plt.close(fig)
+
 
 def plot_all_signals_paginated(df: pd.DataFrame, metric_cols, z, zth, events, outdir: Path, page_size: int = 10):
     import matplotlib.pyplot as plt
@@ -371,6 +619,7 @@ def plot_all_signals_paginated(df: pd.DataFrame, metric_cols, z, zth, events, ou
         fig.savefig(outdir / fname, dpi=170)
         plt.close(fig)
 
+
 def plot_event_contexts(df: pd.DataFrame, events, top_k_metrics: int, outdir: Path, pad_seconds=60):
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
@@ -381,7 +630,7 @@ def plot_event_contexts(df: pd.DataFrame, events, top_k_metrics: int, outdir: Pa
         if not metrics:
             continue
         t0 = e.start_ts - pd.Timedelta(seconds=pad_seconds)
-        t1 = e.end_ts   + pd.Timedelta(seconds=pad_seconds)
+        t1 = e.end_ts + pd.Timedelta(seconds=pad_seconds)
         win = (df[TIMECOL] >= t0) & (df[TIMECOL] <= t1)
         n = len(metrics)
         fig, axes = plt.subplots(n, 1, figsize=(14, 2.6 * n), sharex=True)
@@ -395,16 +644,17 @@ def plot_event_contexts(df: pd.DataFrame, events, top_k_metrics: int, outdir: Pa
         axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
         plt.suptitle(
             f"Event E{e.event_id}  [{e.start_ts.strftime('%H:%M:%S')}–{e.end_ts.strftime('%H:%M:%S')}]  |  {e.reasoning}",
-            y=0.995
+            y=0.995,
         )
         plt.tight_layout(rect=[0, 0, 1, 0.98])
         fig.savefig(outdir / f"event_E{e.event_id}_context.png", dpi=170)
         plt.close(fig)
 
+
 # -----------------------------
 # HTML dashboard
 # -----------------------------
-def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event_imgs):
+def write_html_index(outdir: Path, params: dict, events, alerts, all_signal_pages, event_imgs):
     css = """
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 20px; }
@@ -421,12 +671,51 @@ def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event
     </style>
     """
     params_pre = json.dumps(params, indent=2)
+
+    # Alerts table
+    if alerts:
+        ep_rows = ""
+        for ep in alerts:
+            mix = ", ".join([f"{k}:{v}" for k, v in ep.phase_mix.items()])
+            topm = ", ".join([f"{m}({d},{z:.1f})" for (m, z, d) in ep.metrics_top[:6]])
+            sub_ids = ", ".join(f"E{i}" for i in ep.subevent_ids)
+            ep_rows += (
+                f"<tr>"
+                f"<td>EP{ep.alert_id}</td>"
+                f"<td>{ep.label}</td>"
+                f"<td>{ep.start_ts}</td>"
+                f"<td>{ep.end_ts}</td>"
+                f"<td>{ep.duration_s:.1f}s</td>"
+                f"<td>{ep.n_subevents}</td>"
+                f"<td>{ep.n_points}</td>"
+                f"<td>{ep.max_abs_z:.1f}</td>"
+                f"<td>{ep.max_severity:.2f}</td>"
+                f"<td>{mix}</td>"
+                f"<td class='mono'>{topm}</td>"
+                f"<td class='mono'>{sub_ids}</td>"
+                f"</tr>"
+            )
+        alerts_table = f"""
+        <table>
+          <thead>
+            <tr>
+              <th>Alert</th><th>Label</th><th>Start</th><th>End</th><th>Duration</th>
+              <th>#Subevents</th><th>#Points</th><th>max|z|</th><th>max severity</th>
+              <th>Phase mix</th><th>Top metrics</th><th>Subevents</th>
+            </tr>
+          </thead>
+          <tbody>{ep_rows}</tbody>
+        </table>"""
+    else:
+        alerts_table = "<p class='muted'>No alerts detected.</p>"
+
+    # Subevents table
     if events:
-        rows_html = ""
+        ev_rows = ""
         for e in events:
             mix = ", ".join([f"{k}:{v}" for k, v in e.phase_mix.items()])
             topm = ", ".join([f"{m}({d},{z:.1f})" for (m, z, d) in e.metrics_top[:6]])
-            rows_html += (
+            ev_rows += (
                 f"<tr>"
                 f"<td>E{e.event_id}</td>"
                 f"<td>{e.start_ts}</td>"
@@ -450,10 +739,10 @@ def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event
               <th>Severity</th><th>Label</th><th>Reasoning</th><th>Top metrics</th>
             </tr>
           </thead>
-          <tbody>{rows_html}</tbody>
+          <tbody>{ev_rows}</tbody>
         </table>"""
     else:
-        events_table = "<p class='muted'>No anomaly events detected.</p>"
+        events_table = "<p class='muted'>No subevents detected.</p>"
 
     sig_cards = "\n".join(
         [f"<div class='card'><img src='{Path(p).name}' alt='all-signals'><div class='muted'>{Path(p).name}</div></div>"
@@ -472,7 +761,10 @@ def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event
         <li><a href="features_with_z.csv">features_with_z.csv</a></li>
         <li><a href="anomaly_events.csv">anomaly_events.csv</a></li>
         <li><a href="anomaly_events.json">anomaly_events.json</a></li>
+        <li><a href="alerts.csv">alerts.csv</a></li>
+        <li><a href="alerts.json">alerts.json</a></li>
         <li><a href="INDEX.json">INDEX.json</a></li>
+        <li><a href="alerts_output.json">alerts_output.json</a></li>
       </ul>
     """
 
@@ -491,7 +783,10 @@ def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event
   <h2>Artifacts</h2>
   {links}
 
-  <h2>Anomaly events</h2>
+  <h2>Alerts (cluster hot periods)</h2>
+  {alerts_table}
+
+  <h2>Subevents (spikes inside alerts)</h2>
   {events_table}
 
   <h2>All-signals (paginated)</h2>
@@ -506,24 +801,45 @@ def write_html_index(outdir: Path, params: dict, events, all_signal_pages, event
 """
     (outdir / "index.html").write_text(html, encoding="utf-8")
 
+
 # -----------------------------
 # CLI
 # -----------------------------
 def main():
-    ap = argparse.ArgumentParser(description="CephFS MDS anomaly POC (EWMA + z / hybrid IF + events + severity + HTML)")
+    ap = argparse.ArgumentParser(
+        description="CephFS MDS anomaly POC (EWMA + z / optional IF + alerts + HTML)"
+    )
     ap.add_argument("--base", nargs="*", default=DEFAULT_BASE_FILES, help="Baseline CSVs")
     ap.add_argument("--stress", nargs="*", default=DEFAULT_STRESS_FILES, help="Stress/recovery CSVs")
+    ap.add_argument(
+        "--base-first-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0 AND no base files are provided, tag the first X seconds "
+            "(from earliest timestamp across all CSVs) as 'base' and the rest as 'stress'. "
+            "Ignored if any base file is provided."
+        ),
+    )
     ap.add_argument("--ewma-span", type=int, default=10, help="EWMA span (samples)")
     ap.add_argument("--zth", type=float, default=3.0, help="Z-score threshold")
     ap.add_argument("--topn", type=int, default=6, help="How many metrics to plot individually")
     ap.add_argument("--page-size", type=int, default=10, help="All-signals rows per page")
-    ap.add_argument("--min-metrics", type=int, default=2, help="Min metrics over threshold (z-based rule)")
-    ap.add_argument("--max-gap-sec", type=float, default=30.0, help="Merge anomalies within this gap into one event")
-    ap.add_argument("--iforest-weight", type=float, default=0.0, help="Weight of IsolationForest (0..1)")
-    ap.add_argument("--hybrid-thresh", type=float, default=0.5, help="Hybrid row-score threshold (if iforest-weight>0)")
-    ap.add_argument("--warmup-sec-per-phase", type=float, default=10.0, help="Ignore anomalies for N seconds after phase change")
-    ap.add_argument("--min-duration-sec", type=float, default=8.0, help="Drop events shorter than this duration")
-    ap.add_argument("--min-severity", type=float, default=0.35, help="Drop events below this severity (0..1)")
+    ap.add_argument("--min-metrics", type=int, default=2, help="Min metrics over threshold (z-based row rule)")
+    ap.add_argument("--max-gap-sec", type=float, default=30.0,
+                    help="Merge anomaly rows into subevents within this gap (seconds)")
+    ap.add_argument("--alert-gap-sec", type=float, default=300.0,
+                    help="Merge subevents into alerts if gap between them is <= this many seconds")
+    ap.add_argument("--iforest-weight", type=float, default=0.0,
+                    help="(Kept for compatibility; IF is only used in severity when available)")
+    ap.add_argument("--hybrid-thresh", type=float, default=0.5,
+                    help="(Unused now; kept for CLI compatibility)")
+    ap.add_argument("--warmup-sec-per-phase", type=float, default=10.0,
+                    help="Ignore anomalies for N seconds after phase change")
+    ap.add_argument("--min-duration-sec", type=float, default=8.0,
+                    help="Drop subevents shorter than this duration (seconds)")
+    ap.add_argument("--min-severity", type=float, default=0.35,
+                    help="Drop subevents below this severity (0..1)")
     ap.add_argument("--outdir", type=str, default="out_anomaly", help="Output directory")
     args = ap.parse_args()
 
@@ -532,78 +848,116 @@ def main():
 
     # Load CSVs
     frames = []
-    for fname in args.base:
-        p = Path(fname)
-        if p.exists(): frames.append(load_csv(p, "base"))
-        else: print(f"WARNING: missing baseline file: {p}")
-    for fname in args.stress:
-        p = Path(fname)
-        if p.exists(): frames.append(load_csv(p, "stress"))
-        else: print(f"WARNING: missing stress/recovery file: {p}")
+
+    def _add_files(file_list, label):
+        added = 0
+        for fname in file_list:
+            if not fname:
+                continue
+            p = Path(fname)
+            if p.is_dir():
+                print(f"WARNING: '{p}' is a directory; skipping.")
+                continue
+            if not p.is_file():
+                print(f"WARNING: file not found: {p}")
+                continue
+            df = load_csv(p, label)
+            frames.append(df)
+            added += 1
+        return added
+
+    n_base = _add_files(args.base, "base")
+    n_stress = _add_files(args.stress, "stress")
 
     if not frames:
-        raise SystemExit("No CSVs found. Place your CSVs next to this script and rerun.")
+        raise SystemExit("No CSVs found. Provide --base/--stress files or a single prod CSV via --stress.")
 
-    # Concat, keep expected cols + phase, global sort
+    print("[Files]")
+    for i, df in enumerate(frames):
+        phase0 = df["phase"].iloc[0] if len(df) else "?"
+        print(
+            f"  #{i:02d} phase={phase0:5s} rows={len(df):6d} "
+            f"min={df[TIMECOL].min()} max={df[TIMECOL].max()}"
+        )
+
     raw = pd.concat(frames, ignore_index=True)
     cols_present = [c for c in ALL_EXPECTED if c in raw.columns]
-    raw = raw[cols_present + ["phase"]]
-    raw = raw.sort_values(TIMECOL).reset_index(drop=True)
+    raw = raw[cols_present + ["phase"]].sort_values(TIMECOL).reset_index(drop=True)
+
+    # Phase override if no base files but base-first-seconds specified
+    if n_base == 0 and args.base_first_seconds > 0:
+        t0 = raw[TIMECOL].min()
+        cutoff = t0 + pd.Timedelta(seconds=args.base_first_seconds)
+        raw["phase"] = np.where(raw[TIMECOL] <= cutoff, "base", "stress")
+        print(
+            f"[PhaseOverride] No base files provided; assigned 'base' to first "
+            f"{args.base_first_seconds} seconds ({t0.isoformat()} .. {cutoff.isoformat()}), "
+            "rest as 'stress'."
+        )
+    else:
+        if n_base > 0 and args.base_first_seconds > 0:
+            print("[PhaseOverride] Ignored --base-first-seconds because base files were provided.")
 
     # Prepare features
     feat = prepare_features(raw, ewma_span=args.ewma_span)
-
-    # Strict temporal order (belt-and-suspenders)
     ord_idx = feat[TIMECOL].argsort().values
     feat = feat.iloc[ord_idx].reset_index(drop=True)
 
-    # Baseline mask
     baseline_mask = feat["phase"] == "base"
+    n_base_rows = int(baseline_mask.sum())
+    print(f"[Baseline] rows={n_base_rows}")
 
     # Z-scores vs baseline
     metric_cols, z, mu, sigma = zscore_against_baseline(feat, baseline_mask, use_residuals=True)
     if len(z) != len(feat):
-        z = z.iloc[ord_idx].reset_index(drop=True)
+        z = z.reindex_like(feat[metric_cols])
 
-    # Warm-up suppression after phase changes
+    # Warm-up suppression
     warmup_mask = pd.Series(False, index=feat.index)
     if args.warmup_sec_per_phase > 0:
         flips = feat.index[feat["phase"] != feat["phase"].shift(1)]
         for i in flips:
             t0 = feat.loc[i, TIMECOL]
-            warm = (feat[TIMECOL] >= t0) & (feat[TIMECOL] <= t0 + pd.Timedelta(seconds=args.warmup_sec_per_phase))
+            warm = (feat[TIMECOL] >= t0) & (
+                feat[TIMECOL] <= t0 + pd.Timedelta(seconds=args.warmup_sec_per_phase)
+            )
             warmup_mask |= warm
 
-    # Summaries (z-based)
-    per_metric, per_phase, _ = anomaly_summary(feat[[TIMECOL, "phase"]], metric_cols, z, args.zth)
-    per_metric.to_frame().reset_index().rename(columns={"index": "metric"}).to_csv(outdir / "anomaly_summary_per_metric.csv", index=False)
+    # Summaries
+    per_metric, per_phase, _ = anomaly_summary(
+        feat[[TIMECOL, "phase"]], metric_cols, z, args.zth
+    )
+    pd.DataFrame({"metric": per_metric.index, "anomaly_points": per_metric.values}).to_csv(
+        outdir / "anomaly_summary_per_metric.csv", index=False
+    )
     per_phase.to_csv(outdir / "anomaly_summary_per_phase.csv", header=True)
 
-    # Isolation Forest (optional)
+    # Optional IF (for severity only)
     iforest_score = None
-    try:
-        train_df = feat.loc[baseline_mask, metric_cols]
-        test_df  = feat.loc[:, metric_cols]
-        iforest_score = try_isolation_forest(train_df, test_df, metric_cols)
-        if iforest_score is not None:
-            feat["iforest_score"] = np.nan
-            feat.loc[:, "iforest_score"] = iforest_score
-    except Exception as e:
-        print(f"[IForest] Error: {e}")
+    if n_base_rows > 0:
+        try:
+            train_df = feat.loc[baseline_mask, metric_cols]
+            test_df = feat.loc[:, metric_cols]
+            iforest_score = try_isolation_forest(train_df, test_df, metric_cols)
+            if iforest_score is not None:
+                feat["iforest_score"] = np.nan
+                feat.loc[:, "iforest_score"] = iforest_score
+        except Exception as e:
+            print(f"[IForest] Error: {e}")
 
-    # Build events (hybrid if requested)
+    # Build subevents
     events = build_anomaly_events(
-        feat, z, metric_cols,
+        feat,
+        z,
+        metric_cols,
         zth=args.zth,
         min_metrics=args.min_metrics,
         max_gap_sec=args.max_gap_sec,
-        iforest_weight=args.iforest_weight,
-        hybrid_thresh=args.hybrid_thresh,
         suppress_mask=warmup_mask,
-        min_duration_sec=args.min_duration_sec
+        min_duration_sec=args.min_duration_sec,
     )
 
-    # Filter by severity
+    # Filter subevents by severity
     events = [e for e in events if e.severity >= args.min_severity]
 
     # Persist features + z + auxiliaries
@@ -611,14 +965,16 @@ def main():
     z_out = z.copy()
     z_out.columns = [f"z_{c}" for c in z_out.columns]
     joined = pd.concat([feat_out, z_out], axis=1)
-    for aux in ["z_anom_count", "z_norm", "iforest_score", "iforest_norm", "hybrid_score"]:
-        if aux in feat.columns and aux not in joined.columns:
-            joined[aux] = feat[aux]
     joined["z_max_abs"] = z.abs().max(axis=1)
     joined.to_csv(outdir / "features_with_z.csv", index=False)
 
-    # Save events
+    # Save subevents
     save_anomaly_events(events, outdir)
+
+    # Build alerts with logging
+    alert_log_path = outdir / "alerts_output.json"
+    alerts = build_alerts(events, alert_gap_sec=args.alert_gap_sec, log_path=alert_log_path)
+    save_alerts(alerts, outdir)
 
     # Visuals
     plot_all_signals_paginated(feat, metric_cols, z, args.zth, events, outdir, page_size=args.page_size)
@@ -649,6 +1005,9 @@ def main():
             "features_with_z.csv",
             "anomaly_events.csv",
             "anomaly_events.json",
+            "alerts.csv",
+            "alerts.json",
+            "alerts_output.json",
             "all_signals_anomalies_p*.png",
             "event_E*_context.png",
             "index.html",
@@ -656,24 +1015,26 @@ def main():
         "params": {
             "ewma_span": args.ewma_span,
             "z_threshold": args.zth,
-            "min_metrics_for_event": args.min_metrics,
-            "max_gap_sec": args.max_gap_sec,
+            "min_metrics_for_subevent": args.min_metrics,
+            "max_gap_sec_for_subevent": args.max_gap_sec,
+            "alert_gap_sec": args.alert_gap_sec,
             "page_size": args.page_size,
             "baseline_files": args.base,
             "stress_files": args.stress,
-            "iforest_weight": args.iforest_weight,
-            "hybrid_thresh": args.hybrid_thresh,
+            "base_first_seconds": args.base_first_seconds,
             "warmup_sec_per_phase": args.warmup_sec_per_phase,
             "min_duration_sec": args.min_duration_sec,
             "min_severity": args.min_severity,
         },
-        "events_detected": len(events),
+        "subevents_detected": len(events),
+        "alerts_detected": len(alerts),
     }
     (outdir / "INDEX.json").write_text(json.dumps(index_info, indent=2))
-    write_html_index(outdir, index_info["params"], events, all_signal_pages, event_imgs)
+    write_html_index(outdir, index_info["params"], events, alerts, all_signal_pages, event_imgs)
 
     print(json.dumps(index_info, indent=2))
     print(f"Done. Open: {outdir.resolve()}/index.html")
+
 
 if __name__ == "__main__":
     main()
